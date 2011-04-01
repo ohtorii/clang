@@ -1,0 +1,150 @@
+/* clang.mac
+秀丸マクロ|clangでキーワード補完する
+
+＊動作確認した環境
+	秀丸 					v8.03
+
+@authour    ohtorii
+http://d.hatena.ne.jp/ohtorii/
+*/
+
+////////////////////////////////////////////////////////////////////////////
+//		ユーザーカスタマイズ
+////////////////////////////////////////////////////////////////////////////
+
+//clang.exeへのパス
+//ここから落としたもので動作検証しています。
+//http://unitedsoft.ch/clang/clang.exe
+//
+//GCC版にVisual Studioのヘッダをくわせているので色々怪しいですが、一応動いています。
+//
+$g_clang_exe = "C:\\Users\\hoge\\Documents\\hidemaru_macro\\clang\\clang.exe";
+
+
+//includeディレクトリのパス(Visual Studio 2010)
+$g_include_dir[0] = "C:\\Program Files\\Microsoft Visual Studio 10.0\\VC\\include";
+$g_include_dir[1] = "C:\\Program Files\\Microsoft Visual Studio 10.0\\VC\\atlmfc\\include";
+$g_include_dir[2] = "C:\\Program Files\\Microsoft SDKs\\Windows\\v7.0A\\include";
+#g_include_dir_num=3;
+
+//define定義
+//備考：_MSC_VER=1600はVisual Studio 2010の場合
+$g_define = "-DWIN32 -D_WINDOWS -DNDEBUG -D_MSC_VER=1600 -D__MSVCRT_VERSION__=0x700 -D_WIN32_WINNT=0x0500";
+
+//オプション定義
+$g_option = "-cc1 -fsyntax-only -x c++ -fno-caret-diagnostics -fdiagnostics-print-source-range-info -std=c++0x -fms-extensions -fmsc-version=1600 -fgnu-runtime";
+
+
+
+
+////////////////////////////////////////////////////////////////////////////
+//		メイン処理
+////////////////////////////////////////////////////////////////////////////
+
+//環境毎に異なるオプションを固定する、マクロ終了時に戻るので利用者の環境を変更することはない。
+//折りたたみを維持,部分編集を維持,範囲選択,最後に移動
+setcompatiblemode 0x0003|0x000c|0x0200|0x2000;
+
+$old_searchbuffer = searchbuffer;
+#old_searchoption = searchoption;
+call Main;
+setsearch $old_searchbuffer, #old_searchoption;
+endmacro;
+
+
+Main:
+	if("new"==filetype){
+		message("ファイルに保存してから試してください。\nこのマクロはサンプルなので手抜きです。");
+		return false;
+	}
+	if(updated){
+		message("ファイルが更新されています、まずは保存してから試してください。\nこのマクロはサンプルなので手抜きです。");
+		return false;
+	}
+
+	call MakeIncludeOption;
+	$$include = $$return;
+	if(0==strlen($$include)){
+		message("includeディレクトリが空白です。グローバル変数 $g_include_dir[] の定義が間違っているかも。");
+		return false;
+	}
+	$$fn = basename;
+	$$completion = "-code-completion-at=" + $$fn + ":"+str(lineno)+":"+str(column+1)+" " + $$fn;
+	$$arg = $g_option + " " + $$completion + " " + $g_define + " " + $$include;
+
+	title "running clang.";
+	##old_hidemaru = hidemaruhandle(0);
+	openfile "/h ";
+	disabledraw;
+	disableinvert;
+	##cur_hidemaru = hidemaruhandle(0);
+
+	runex $g_clang_exe + " " + $$arg, 1
+			, 0, ""
+			, 5, ""
+			, 0, ""
+			, 1, ""
+			, 2, 1, 0;
+	if(!result){
+		message("runexの呼び出しで失敗");
+		setactivehidemaru ##old_hidemaru;
+		closehidemaruforced ##cur_hidemaru;
+		return false;
+	}
+
+	//補完の候補を $$guess[] へ代入する。
+	gofiletop;
+	##guess_num = 0;
+	$$guess[0]	= "";
+	$$guess_str = "";
+	searchdown2 "(?<=^COMPLETION:[ \\t]+)[^ ]+",casesense,regular,nohilight;
+	while(result){
+		$$tmp = gettext2(seltopcolumn,seltoplineno,selendcolumn,selendlineno);
+		if(strlen($$tmp)){
+			$$guess_str = $$guess_str + $$tmp + "\n";
+			$$guess[##guess_num] = $$tmp;
+			##guess_num = ##guess_num + 1;
+		}
+		finddown2;
+	}
+
+	if(##guess_num){
+		selectall;
+		backspace;
+		insert($$guess_str);
+		setactivehidemaru ##old_hidemaru;
+		//直前の秀丸を辞書として使用する。
+		autocomplete -1, 0x00000040, 0x00008000;
+	}else{
+		setactivehidemaru ##old_hidemaru;
+	}
+	closehidemaruforced ##cur_hidemaru;
+	title 0;
+	return true;
+
+MakeIncludeOption:
+	##i 	= 0;
+	$$retult= "";
+	while(##i < #g_include_dir_num){
+		if(0 < ##i){
+			$$retult = $$retult + " ";
+		}
+		call ConvertShortFolderName $g_include_dir[##i];
+		$$short_name = $$return;
+		if(! strlen($$short_name)){
+			return"";
+		}
+		$$retult = $$retult + "-I" + $$short_name;
+		##i=##i+1;
+	}
+	return $$retult;
+
+//長い文字列を runex に与えるとハングするっぽいので回避。
+ConvertShortFolderName:
+	ConvertShortName:
+	$$fn = $$1;
+	##fso = createobject("Scripting.FileSystemObject");
+	##obj = callmethod_returnobj(##fso,"GetFolder",$$fn);
+	$$short_name = getpropstr(##obj,"ShortPath");
+	releaseobject(##fso);
+	return $$short_name;
