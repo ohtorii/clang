@@ -1,4 +1,5 @@
 # clangでキーワード補完する秀丸マクロ
+![example](hidemaru.png)
 
 # 動作確認した環境
 秀丸エディタ v8.03
